@@ -1,0 +1,31 @@
+# Python virtual env and cache
+backend/.venv/
+**/__pycache__/
+**/*.pyc
+
+# Go build artifacts
+pinger/pinger
+pinger/pinger.exe
+pinger/*.exe
+pinger/*.out
+
+# Database local storage volume
+db/pgdata/
+
+# Frontend node_modules & build output
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/.output/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environments
+.env
+.env.*
+
+# IDE settings
+.vscode/
+.idea/
