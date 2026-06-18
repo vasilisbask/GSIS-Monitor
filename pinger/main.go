@@ -43,7 +43,7 @@ func main() {
 	fmt.Sscanf(dbPortStr, "%d", &dbPort)
 	dbName := getEnv("DB_NAME", "gsis_monitor")
 	dbUser := getEnv("DB_USER", "gsis_user")
-	dbPass := getEnv("DB_PASSWORD", "gsis_password")
+	dbPass := getEnv("DB_PASSWORD", "")
 
 	log.Printf("Connecting to database at %s:%d/%s...", dbHost, dbPort, dbName)
 	db, err := ConnectDB(dbHost, dbPort, dbUser, dbPass, dbName)

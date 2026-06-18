@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     db_port: int = 5433
     db_name: str = "gsis_monitor"
     db_user: str = "gsis_user"
-    db_password: str = "gsis_password"
+    db_password: str = ""
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(__file__), "..", ".env"),
@@ -16,6 +16,6 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        return f"postgresql+psycopg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+        return f"postgresql+psycopg2://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
 
 settings = Settings()

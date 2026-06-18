@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gsis-monitor-config
+data:
+  DB_HOST: "db-service"
+  DB_PORT: "5432"
+  DB_NAME: "gsis_monitor"
+  DB_USER: "gsis_user"
+

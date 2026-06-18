@@ -4,7 +4,6 @@
 
 	const API_BASE = 'http://localhost:8000';
 
-	// Dashboard state (Svelte 5 reactive state)
 	let summary = $state({
 		total_services: 0,
 		active_services: 0,
@@ -19,45 +18,43 @@
 	let selectedRange = $state('24h');
 	let serviceLogs = $state([]);
 	let isLoadingLogs = $state(false);
+	let isLoadingSummary = $state(true);
 	let logsError = $state(null);
+	let lastRefreshed = $state(null);
 
 	let chartCanvas = $state(null);
 	let chartInstance = null;
 	let pollInterval = null;
 
-	// Load dashboard summary
 	async function loadSummary() {
 		try {
 			const res = await fetch(`${API_BASE}/api/dashboard/summary`);
 			if (!res.ok) throw new Error('Failed to load summary');
 			summary = await res.json();
-			
-			// Auto-select first service if none selected
+			lastRefreshed = new Date();
 			if (summary.services.length > 0 && !selectedService) {
 				selectService(summary.services[0]);
 			} else if (selectedService) {
-				// Update selected service reference to get fresh metrics
 				const updated = summary.services.find(s => s.id === selectedService.id);
 				if (updated) selectedService = updated;
 			}
 		} catch (e) {
 			console.error(e);
+		} finally {
+			isLoadingSummary = false;
 		}
 	}
 
-	// Select service to load logs and display chart
 	function selectService(service) {
 		selectedService = service;
 		loadLogs();
 	}
 
-	// Change chart range
 	function changeRange(range) {
 		selectedRange = range;
 		loadLogs();
 	}
 
-	// Load logs for the selected service and range
 	async function loadLogs() {
 		if (!selectedService) return;
 		isLoadingLogs = true;
@@ -74,62 +71,53 @@
 		}
 	}
 
-	// Format timestamp labels based on time range and date
+	async function manualRefresh() {
+		isLoadingSummary = true;
+		await Promise.all([loadSummary(), loadLogs()]);
+	}
+
 	function formatLabel(timeStr) {
 		const d = new Date(timeStr);
 		const now = new Date();
-		const isToday = d.getDate() === now.getDate() && 
-		                d.getMonth() === now.getMonth() && 
-		                d.getFullYear() === now.getFullYear();
-		
-		const timePart = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-		
-		if (selectedRange === '1h' || selectedRange === '6h') {
-			return timePart;
-		}
-		
-		if (isToday) {
-			return timePart;
-		} else {
-			return `${d.getDate()}/${d.getMonth() + 1} ${timePart}`;
-		}
+		const isToday = d.toDateString() === now.toDateString();
+		const timePart = d.toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' });
+		if (selectedRange === '1h' || selectedRange === '6h' || isToday) return timePart;
+		return `${d.getDate()}/${d.getMonth() + 1} ${timePart}`;
 	}
 
-	// Render the stacked-bar chart
+	function formatLastRefreshed(d) {
+		if (!d) return '';
+		return d.toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+	}
+
+	// Uptime percentage from logs
+	function uptimePercent(logs) {
+		if (!logs || logs.length === 0) return null;
+		const healthy = logs.filter(l => l.is_healthy).length;
+		return ((healthy / logs.length) * 100).toFixed(1);
+	}
+
 	function renderChart() {
 		if (!chartCanvas) return;
-
-		// Clean up existing chart
-		if (chartInstance) {
-			chartInstance.destroy();
-			chartInstance = null;
-		}
-
+		if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
 		if (serviceLogs.length === 0) return;
 
-		// Downsample logs if there are too many to keep the chart responsive and legible
-		let sampledLogs = [...serviceLogs];
-		const maxBars = 50;
-		if (sampledLogs.length > maxBars) {
-			const step = Math.ceil(sampledLogs.length / maxBars);
-			sampledLogs = sampledLogs.filter((_, idx) => idx % step === 0);
+		let sampled = [...serviceLogs];
+		const maxBars = 60;
+		if (sampled.length > maxBars) {
+			const step = Math.ceil(sampled.length / maxBars);
+			sampled = sampled.filter((_, i) => i % step === 0);
 		}
 
-		const labels = sampledLogs.map(l => formatLabel(l.time));
-		const dnsData = sampledLogs.map(l => l.dns_lookup_ms || 0);
-		const tcpData = sampledLogs.map(l => l.tcp_connect_ms || 0);
-		const tlsData = sampledLogs.map(l => l.tls_handshake_ms || 0);
-		
-		// TTFB represents the remainder of time up to the first byte
-		// Total response represents total response time.
-		const ttfbData = sampledLogs.map(l => {
-			const dns = l.dns_lookup_ms || 0;
-			const tcp = l.tcp_connect_ms || 0;
-			const tls = l.tls_handshake_ms || 0;
+		const labels  = sampled.map(l => formatLabel(l.time));
+		const dnsData  = sampled.map(l => l.dns_lookup_ms  || 0);
+		const tcpData  = sampled.map(l => l.tcp_connect_ms || 0);
+		const tlsData  = sampled.map(l => l.tls_handshake_ms || 0);
+		const ttfbData = sampled.map(l => {
 			const ttfb = l.ttfb_ms || 0;
-			// TTFB trace in Go might include DNS/TCP/TLS. Let's calculate network trace remainder:
-			const remainder = ttfb - dns - tcp - tls;
-			return remainder > 0 ? remainder : ttfb;
+			const base = (l.dns_lookup_ms || 0) + (l.tcp_connect_ms || 0) + (l.tls_handshake_ms || 0);
+			const rem  = ttfb - base;
+			return rem > 0 ? rem : ttfb;
 		});
 
 		chartInstance = new Chart(chartCanvas, {
@@ -137,30 +125,10 @@
 			data: {
 				labels,
 				datasets: [
-					{
-						label: 'DNS Lookup (ms)',
-						data: dnsData,
-						backgroundColor: '#0188ca', // Primary blue
-						borderWidth: 0
-					},
-					{
-						label: 'TCP Connect (ms)',
-						data: tcpData,
-						backgroundColor: '#6b7280', // Slate gray
-						borderWidth: 0
-					},
-					{
-						label: 'TLS Handshake (ms)',
-						data: tlsData,
-						backgroundColor: '#ed5929', // Accent orange
-						borderWidth: 0
-					},
-					{
-						label: 'TTFB / Processing (ms)',
-						data: ttfbData,
-						backgroundColor: '#9ca3af', // Light gray
-						borderWidth: 0
-					}
+					{ label: 'DNS Lookup (ms)',      data: dnsData,  backgroundColor: '#0188ca', borderWidth: 0 },
+					{ label: 'TCP Connect (ms)',      data: tcpData,  backgroundColor: '#6b7280', borderWidth: 0 },
+					{ label: 'TLS Handshake (ms)',    data: tlsData,  backgroundColor: '#ed5929', borderWidth: 0 },
+					{ label: 'TTFB / Processing (ms)',data: ttfbData, backgroundColor: '#9ca3af', borderWidth: 0 }
 				]
 			},
 			options: {
@@ -169,54 +137,43 @@
 				scales: {
 					x: {
 						stacked: true,
-						grid: {
-							display: false
-						},
-						ticks: {
-							font: {
-								size: 10
-							}
-						}
+						grid: { display: false },
+						ticks: { font: { size: 10, family: 'Inter' }, color: '#9ca3af', maxTicksLimit: 12 }
 					},
 					y: {
 						stacked: true,
-						title: {
-							display: true,
-							text: 'Καθυστέρηση (ms)',
-							font: {
-								weight: 'bold'
-							}
-						},
-						ticks: {
-							font: {
-								size: 10
-							}
-						}
+						title: { display: true, text: 'ms', font: { size: 11, weight: '600' }, color: '#6b7280' },
+						ticks: { font: { size: 10 }, color: '#9ca3af' },
+						grid: { color: '#f3f4f6' }
 					}
 				},
 				plugins: {
 					legend: {
 						position: 'bottom',
-						labels: {
-							boxWidth: 12,
-							font: {
-								size: 11
-							}
-						}
+						labels: { boxWidth: 10, boxHeight: 10, font: { size: 11 }, padding: 16, color: '#4b5563' }
 					},
 					tooltip: {
 						mode: 'index',
-						intersect: false
+						intersect: false,
+						backgroundColor: '#111827',
+						titleColor: '#f9fafb',
+						bodyColor: '#d1d5db',
+						borderColor: '#374151',
+						borderWidth: 1,
+						padding: 12,
+						callbacks: {
+							label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} ms`
+						}
 					}
-				}
+				},
+				animation: { duration: 300 }
 			}
 		});
 	}
 
 	onMount(() => {
 		loadSummary();
-		// Poll summary data every 10 seconds
-		pollInterval = setInterval(loadSummary, 10000);
+		pollInterval = setInterval(loadSummary, 15000);
 	});
 
 	onDestroy(() => {
@@ -224,452 +181,278 @@
 		if (chartInstance) chartInstance.destroy();
 	});
 
-	// Reactively re-run chart render if canvas references load or selectedRange changes
 	$effect(() => {
 		if (chartCanvas && serviceLogs.length > 0) {
-			// Explicit dependency on selectedRange to trigger effect on change
 			selectedRange;
 			renderChart();
 		}
 	});
+
+	// Compute total uptime across logs (for selected service)
+	let uptimePct = $derived(uptimePercent(serviceLogs));
+
+	// Health class for response time coloring
+	function latencyClass(ms) {
+		if (ms === null || ms === undefined) return '';
+		if (ms < 500)  return 'latency-good';
+		if (ms < 2000) return 'latency-warn';
+		return 'latency-bad';
+	}
 </script>
 
 <div class="container">
-	<div class="dashboard-header">
-		<h2>Επισκόπηση Διαθεσιμότητας Υπηρεσιών</h2>
-		<p>Σύστημα ελέγχου και καταγραφής τηλεμετρίας σε πραγματικό χρόνο.</p>
+
+	<!-- Page Header -->
+	<div class="page-header">
+		<div>
+			<h2 class="page-title">Επισκόπηση Διαθεσιμότητας</h2>
+			<p class="page-subtitle">Ζωντανή παρακολούθηση και τηλεμετρία υπηρεσιών σε πραγματικό χρόνο.</p>
+		</div>
+		<button class="refresh-btn" onclick={manualRefresh} disabled={isLoadingSummary || isLoadingLogs} title="Χειροκίνητη Ανανέωση">
+			<svg class={isLoadingSummary || isLoadingLogs ? 'spinning' : ''} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<polyline points="23 4 23 10 17 10"></polyline>
+				<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+			</svg>
+			{#if isLoadingSummary || isLoadingLogs}
+				Ανανέωση...
+			{:else if lastRefreshed}
+				Ανανεώθηκε {formatLastRefreshed(lastRefreshed)}
+			{:else}
+				Ανανέωση
+			{/if}
+		</button>
 	</div>
 
-	<!-- Summary Cards -->
+	<!-- KPI Cards -->
 	<div class="metrics-grid">
+
 		<div class="metric-card">
-			<span class="metric-title">Σύνολο Υπηρεσιών</span>
-			<span class="metric-value">{summary.total_services}</span>
-			<div class="metric-sub">
-				Ενεργές: <strong>{summary.active_services}</strong>
+			<div class="metric-icon-wrap icon-blue">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect>
+					<rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect>
+				</svg>
+			</div>
+			<div class="metric-body">
+				<span class="metric-label">ΣΥΝΟΛΟ ΠΥΛΩΝ</span>
+				<span class="metric-value">{isLoadingSummary ? '—' : summary.total_services}</span>
+				<span class="metric-sub">Ενεργές: <strong>{summary.active_services}</strong></span>
 			</div>
 		</div>
-		<div class="metric-card">
-			<span class="metric-title">Υγιείς Πύλες</span>
-			<span class="metric-value text-success">{summary.healthy_services}</span>
-			<div class="metric-sub">
-				Σε λειτουργία
+
+		<div class="metric-card metric-card--success">
+			<div class="metric-icon-wrap icon-green">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+					<polyline points="22 4 12 14.01 9 11.01"></polyline>
+				</svg>
+			</div>
+			<div class="metric-body">
+				<span class="metric-label">ΛΕΙΤΟΥΡΓΟΥΝ</span>
+				<span class="metric-value text-success">{isLoadingSummary ? '—' : summary.healthy_services}</span>
+				<span class="metric-sub">Υγιείς πύλες</span>
 			</div>
 		</div>
-		<div class="metric-card">
-			<span class="metric-title">Εκτός Λειτουργίας</span>
-			<span class="metric-value" class:text-error={summary.unhealthy_services > 0} class:text-muted={summary.unhealthy_services === 0}>
-				{summary.unhealthy_services}
-			</span>
-			<div class="metric-sub">
-				Απαιτούν προσοχή
+
+		<div class="metric-card" class:metric-card--error={summary.unhealthy_services > 0}>
+			<div class="metric-icon-wrap icon-red">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<circle cx="12" cy="12" r="10"></circle>
+					<line x1="15" y1="9" x2="9" y2="15"></line>
+					<line x1="9" y1="9" x2="15" y2="15"></line>
+				</svg>
+			</div>
+			<div class="metric-body">
+				<span class="metric-label">ΕΚΤΟΣ ΛΕΙΤΟΥΡΓΙΑΣ</span>
+				<span class="metric-value" class:text-error={summary.unhealthy_services > 0} class:text-muted={summary.unhealthy_services === 0}>
+					{isLoadingSummary ? '—' : summary.unhealthy_services}
+				</span>
+				<span class="metric-sub">Απαιτούν προσοχή</span>
 			</div>
 		</div>
-		<div class="metric-card">
-			<span class="metric-title">Ενεργές Ειδοποιήσεις</span>
-			<span class="metric-value" class:text-warning={summary.active_alerts > 0} class:text-muted={summary.active_alerts === 0}>
-				{summary.active_alerts}
-			</span>
-			<div class="metric-sub">
-				Alert logs
+
+		<div class="metric-card" class:metric-card--warning={summary.active_alerts > 0}>
+			<div class="metric-icon-wrap icon-orange">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+					<path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+				</svg>
+			</div>
+			<div class="metric-body">
+				<span class="metric-label">ΕΝΕΡΓΕΣ ΕΙΔΟΠΟΙΗΣΕΙΣ</span>
+				<span class="metric-value" class:text-warning={summary.active_alerts > 0} class:text-muted={summary.active_alerts === 0}>
+					{isLoadingSummary ? '—' : summary.active_alerts}
+				</span>
+				<span class="metric-sub">Alert logs</span>
 			</div>
 		</div>
+
 		<div class="metric-card">
-			<span class="metric-title">Μέση Απόκριση (24h)</span>
-			<span class="metric-value text-primary">{summary.average_response_time_ms} ms</span>
-			<div class="metric-sub">
-				Απόκριση δικτύου
+			<div class="metric-icon-wrap icon-blue">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<circle cx="12" cy="12" r="10"></circle>
+					<polyline points="12 6 12 12 16 14"></polyline>
+				</svg>
+			</div>
+			<div class="metric-body">
+				<span class="metric-label">Μέση Απόκριση</span>
+				<span class="metric-value text-primary">{isLoadingSummary ? '—' : summary.average_response_time_ms} <span class="metric-unit">ms</span></span>
+				<span class="metric-sub">Τελευταίο 24h</span>
 			</div>
 		</div>
+
 	</div>
 
+	<!-- Dashboard body -->
 	<div class="dashboard-layout">
-		<!-- Services Cards Grid -->
-		<div class="services-column">
-			<h3 class="column-title">Κατάσταση Υπηρεσιών</h3>
-			<div class="services-list">
-				{#each summary.services as service}
-					<button 
-						class="service-card" 
-						class:active={selectedService && selectedService.id === service.id}
-						class:unhealthy={!service.is_healthy}
-						onclick={() => selectService(service)}
-					>
-						<div class="service-card-header">
-							<span class="service-name">{service.name}</span>
-							<span class="status-badge" class:healthy={service.is_healthy} class:unhealthy={!service.is_healthy}>
-								<span class="status-dot" class:healthy={service.is_healthy} class:unhealthy={!service.is_healthy}></span>
-								{service.is_healthy ? 'ONLINE' : 'OFFLINE'}
-							</span>
-						</div>
-						
-						<div class="service-url">{service.url}</div>
-						
-						<div class="service-metrics">
-							<div class="metric-item">
-								<span class="label">Απόκριση:</span>
-								<span class="val">
-									{service.last_response_time_ms ? `${service.last_response_time_ms.toFixed(1)} ms` : '-'}
-								</span>
-							</div>
-							<div class="metric-item">
-								<span class="label">SSL Expiry:</span>
-								<span class="val" class:text-error={service.ssl_expiry_days !== null && service.ssl_expiry_days < 15}>
-									{service.ssl_expiry_days !== null ? `${service.ssl_expiry_days} ημ.` : '-'}
-								</span>
-							</div>
-						</div>
 
-						{#if service.active_alerts_count > 0}
-							<div class="service-alert-pill">
-								Ενεργές Ειδοποιήσεις: {service.active_alerts_count}
-							</div>
-						{/if}
-					</button>
-				{/each}
+		<!-- Services list -->
+		<div class="services-column">
+			<div class="column-header">
+				<h3 class="column-title">Κατάσταση Υπηρεσιών</h3>
+				{#if summary.services.length > 0}
+					<span class="count-badge">{summary.services.length}</span>
+				{/if}
 			</div>
+
+			{#if isLoadingSummary}
+				<div class="services-list">
+					{#each {length: 3} as _}
+						<div class="service-card skeleton-card">
+							<div class="skeleton" style="height:1rem;width:60%;margin-bottom:0.5rem"></div>
+							<div class="skeleton" style="height:0.75rem;width:80%"></div>
+						</div>
+					{/each}
+				</div>
+			{:else if summary.services.length === 0}
+				<div class="empty-services">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<circle cx="12" cy="12" r="10"></circle>
+						<line x1="12" y1="8" x2="12" y2="12"></line>
+						<line x1="12" y1="16" x2="12.01" y2="16"></line>
+					</svg>
+					<p>Δεν υπάρχουν καταχωρημένες υπηρεσίες.</p>
+					<a href="/services" class="empty-link">Προσθήκη υπηρεσίας</a>
+				</div>
+			{:else}
+				<div class="services-list">
+					{#each summary.services as service (service.id)}
+						<button
+							class="service-card"
+							class:active={selectedService && selectedService.id === service.id}
+							class:unhealthy={!service.is_healthy && service.is_active}
+							onclick={() => selectService(service)}
+						>
+							<div class="service-card-header">
+								<span class="service-name">{service.name}</span>
+								<span class="status-badge" class:healthy={service.is_healthy} class:unhealthy={!service.is_healthy && service.is_active} class:inactive={!service.is_active}>
+									<span class="status-dot" class:healthy={service.is_healthy} class:unhealthy={!service.is_healthy && service.is_active} class:inactive={!service.is_active}></span>
+									{#if !service.is_active}ΑΝΕΝΕΡΓΗ{:else if service.is_healthy}ONLINE{:else}OFFLINE{/if}
+								</span>
+							</div>
+
+							<div class="service-url">{service.url}</div>
+
+							<div class="service-metrics">
+								<div class="svc-metric">
+									<span class="svc-metric-label">Απόκριση</span>
+									<span class="svc-metric-val {latencyClass(service.last_response_time_ms)}">
+										{service.last_response_time_ms ? `${service.last_response_time_ms.toFixed(0)} ms` : '—'}
+									</span>
+								</div>
+								<div class="svc-metric">
+									<span class="svc-metric-label">HTTP</span>
+									<span class="svc-metric-val">{service.last_status_code ?? '—'}</span>
+								</div>
+								{#if service.ssl_expiry_days !== null}
+									<div class="svc-metric">
+										<span class="svc-metric-label">SSL</span>
+										<span class="svc-metric-val" class:text-error={service.ssl_expiry_days < 15} class:text-warning={service.ssl_expiry_days < 30 && service.ssl_expiry_days >= 15}>
+											{service.ssl_expiry_days}ημ.
+										</span>
+									</div>
+								{/if}
+							</div>
+
+							{#if service.active_alerts_count > 0}
+								<div class="alert-pill">
+									{service.active_alerts_count} ενεργ{service.active_alerts_count === 1 ? 'ή' : 'ές'} ειδοποίηση
+								</div>
+							{/if}
+						</button>
+					{/each}
+				</div>
+			{/if}
 		</div>
 
-		<!-- Latency Chart Area -->
+		<!-- Chart panel -->
 		<div class="chart-column">
 			<div class="chart-card">
 				{#if selectedService}
 					<div class="chart-header">
-						<div>
-							<h3 class="chart-title">Ανάλυση Καθυστέρησης: {selectedService.name}</h3>
-							<p class="chart-subtitle">Ανάλυση DNS, TCP, TLS, TTFB (ms)</p>
+						<div class="chart-title-group">
+							<h3 class="chart-title">Ανάλυση Καθυστέρησης</h3>
+							<p class="chart-subtitle">
+								<strong>{selectedService.name}</strong>
+								&mdash; DNS · TCP · TLS · TTFB (ms)
+								{#if uptimePct !== null}
+									<span class="uptime-tag" class:uptime-ok={uptimePct >= 99} class:uptime-warn={uptimePct < 99 && uptimePct >= 90} class:uptime-bad={uptimePct < 90}>
+										Uptime {uptimePct}%
+									</span>
+								{/if}
+							</p>
 						</div>
-						<div class="range-selector">
-							<button class:active={selectedRange === '1h'} onclick={() => changeRange('1h')}>1h</button>
-							<button class:active={selectedRange === '6h'} onclick={() => changeRange('6h')}>6h</button>
-							<button class:active={selectedRange === '24h'} onclick={() => changeRange('24h')}>24h</button>
-							<button class:active={selectedRange === '7d'} onclick={() => changeRange('7d')}>7d</button>
+						<div class="range-selector" role="group" aria-label="Εύρος χρόνου">
+							{#each ['1h','6h','24h','7d'] as r}
+								<button
+									class:active={selectedRange === r}
+									onclick={() => changeRange(r)}
+									aria-pressed={selectedRange === r}
+								>{r}</button>
+							{/each}
 						</div>
 					</div>
 
-					<div class="chart-container-wrapper">
+					<div class="chart-wrapper">
 						{#if isLoadingLogs}
 							<div class="chart-overlay">
 								<span class="spinner"></span>
 								<span>Φόρτωση δεδομένων...</span>
 							</div>
 						{/if}
-
 						{#if logsError}
-							<div class="chart-overlay error-text">
-								<span>Σφάλμα: {logsError}</span>
+							<div class="chart-overlay error">
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:2rem;height:2rem">
+									<circle cx="12" cy="12" r="10"></circle>
+									<line x1="12" y1="8" x2="12" y2="12"></line>
+									<line x1="12" y1="16" x2="12.01" y2="16"></line>
+								</svg>
+								Σφάλμα: {logsError}
 							</div>
 						{/if}
-
 						{#if !isLoadingLogs && !logsError && serviceLogs.length === 0}
 							<div class="chart-overlay">
-								<span>Δεν βρέθηκαν telemetry logs για αυτή την περίοδο.</span>
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:2.5rem;height:2.5rem;color:var(--text-muted)">
+									<line x1="18" y1="20" x2="18" y2="10"></line>
+									<line x1="12" y1="20" x2="12" y2="4"></line>
+									<line x1="6"  y1="20" x2="6"  y2="14"></line>
+								</svg>
+								Δεν βρέθηκαν δεδομένα για αυτή την περίοδο.
 							</div>
 						{/if}
-
 						<canvas bind:this={chartCanvas}></canvas>
 					</div>
+
 				{:else}
 					<div class="no-selection">
-						<p>Παρακαλώ επιλέξτε μια υπηρεσία από τη λίστα για να δείτε τα γραφήματα τηλεμετρίας.</p>
+						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+							<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+						</svg>
+						<p>Επιλέξτε υπηρεσία για να δείτε τα γραφήματα τηλεμετρίας.</p>
 					</div>
 				{/if}
 			</div>
 		</div>
+
 	</div>
 </div>
-
-<style>
-	.dashboard-header {
-		margin-bottom: 2rem;
-	}
-
-	.dashboard-header h2 {
-		font-size: 1.75rem;
-		color: var(--primary-color);
-	}
-
-	.dashboard-header p {
-		color: var(--text-secondary);
-		font-size: 0.9375rem;
-		margin-top: 0.25rem;
-	}
-
-	/* Metrics summary grid */
-	.metrics-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-		gap: 1rem;
-		margin-bottom: 2.5rem;
-	}
-
-	.metric-card {
-		background-color: var(--bg-card);
-		border: 1px solid var(--border-color);
-		border-radius: var(--radius-lg);
-		padding: 1.25rem;
-		box-shadow: var(--shadow-sm);
-		display: flex;
-		flex-direction: column;
-	}
-
-	.metric-title {
-		font-size: 0.8125rem;
-		font-weight: 600;
-		color: var(--text-secondary);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.metric-value {
-		font-family: 'Outfit', sans-serif;
-		font-size: 1.875rem;
-		font-weight: 700;
-		margin: 0.375rem 0;
-	}
-
-	.metric-sub {
-		font-size: 0.75rem;
-		color: var(--text-muted);
-	}
-
-	.text-success {
-		color: var(--success-color);
-	}
-
-	.text-error {
-		color: var(--error-color);
-	}
-
-	.text-warning {
-		color: var(--accent-color);
-	}
-
-	.text-primary {
-		color: var(--primary-color);
-	}
-
-	.text-muted {
-		color: var(--text-muted);
-	}
-
-	/* Layout structure */
-	.dashboard-layout {
-		display: grid;
-		grid-template-columns: 380px 1fr;
-		gap: 2rem;
-		align-items: start;
-	}
-
-	.column-title {
-		font-size: 1.125rem;
-		color: var(--text-primary);
-		margin-bottom: 1rem;
-		padding-left: 0.25rem;
-	}
-
-	.services-list {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-
-	.service-card {
-		background-color: var(--bg-card);
-		border: 1px solid var(--border-color);
-		border-radius: var(--radius-lg);
-		padding: 1.25rem;
-		text-align: left;
-		width: 100%;
-		display: flex;
-		flex-direction: column;
-		box-shadow: var(--shadow-sm);
-		transition: var(--transition-all);
-	}
-
-	.service-card:hover {
-		border-color: var(--primary-color);
-		transform: translateY(-2px);
-		box-shadow: var(--shadow-md);
-	}
-
-	.service-card.active {
-		border-color: var(--primary-color);
-		box-shadow: 0 0 0 3px rgba(1, 136, 202, 0.15);
-		background-color: var(--primary-light);
-	}
-
-	.service-card.unhealthy {
-		border-left: 4px solid var(--error-color);
-	}
-
-	.service-card-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 0.5rem;
-	}
-
-	.service-name {
-		font-family: 'Outfit', sans-serif;
-		font-weight: 600;
-		font-size: 1rem;
-		color: var(--text-primary);
-	}
-
-	.service-url {
-		font-size: 0.75rem;
-		color: var(--text-muted);
-		word-break: break-all;
-		margin-bottom: 0.875rem;
-	}
-
-	.service-metrics {
-		display: flex;
-		justify-content: space-between;
-		font-size: 0.8125rem;
-		color: var(--text-secondary);
-	}
-
-	.metric-item {
-		display: flex;
-		gap: 0.25rem;
-	}
-
-	.metric-item .label {
-		color: var(--text-muted);
-	}
-
-	.metric-item .val {
-		font-weight: 600;
-	}
-
-	.service-alert-pill {
-		margin-top: 0.875rem;
-		background-color: var(--error-light);
-		color: var(--error-color);
-		font-size: 0.75rem;
-		font-weight: 700;
-		padding: 0.375rem 0.625rem;
-		border-radius: var(--radius-sm);
-		text-align: center;
-	}
-
-	/* Chart container styling */
-	.chart-card {
-		background-color: var(--bg-card);
-		border: 1px solid var(--border-color);
-		border-radius: var(--radius-lg);
-		padding: 1.5rem;
-		box-shadow: var(--shadow-md);
-		min-height: 480px;
-		display: flex;
-		flex-direction: column;
-	}
-
-	.chart-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		margin-bottom: 1.5rem;
-		border-bottom: 1px solid var(--border-color);
-		padding-bottom: 1rem;
-	}
-
-	.chart-title {
-		font-size: 1.25rem;
-		color: var(--text-primary);
-	}
-
-	.chart-subtitle {
-		font-size: 0.8125rem;
-		color: var(--text-muted);
-		margin-top: 0.125rem;
-	}
-
-	.range-selector {
-		display: flex;
-		background-color: var(--bg-darker);
-		border: 1px solid var(--border-color);
-		border-radius: var(--radius-md);
-		padding: 0.25rem;
-	}
-
-	.range-selector button {
-		background: none;
-		padding: 0.375rem 0.75rem;
-		font-size: 0.75rem;
-		font-weight: 600;
-		color: var(--text-secondary);
-		border-radius: var(--radius-sm);
-	}
-
-	.range-selector button.active {
-		background-color: var(--primary-color);
-		color: var(--bg-color);
-	}
-
-	.chart-container-wrapper {
-		position: relative;
-		flex: 1;
-		min-height: 350px;
-	}
-
-	.chart-overlay {
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		background-color: rgba(255, 255, 255, 0.8);
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-		align-items: center;
-		gap: 1rem;
-		font-size: 0.875rem;
-		color: var(--text-secondary);
-		z-index: 10;
-		border-radius: var(--radius-md);
-	}
-
-	.error-text {
-		color: var(--error-color);
-		font-weight: 500;
-	}
-
-	.spinner {
-		width: 2rem;
-		height: 2rem;
-		border: 3px solid var(--border-color);
-		border-top-color: var(--primary-color);
-		border-radius: 50%;
-		animation: spin 1s linear infinite;
-	}
-
-	.no-selection {
-		display: flex;
-		flex: 1;
-		justify-content: center;
-		align-items: center;
-		color: var(--text-muted);
-		text-align: center;
-		padding: 3rem;
-	}
-
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-
-	@media (max-width: 1024px) {
-		.dashboard-layout {
-			grid-template-columns: 1fr;
-		}
-
-		.chart-card {
-			min-height: 400px;
-		}
-	}
-</style>

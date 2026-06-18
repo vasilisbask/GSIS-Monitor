@@ -8,7 +8,14 @@ from datetime import datetime, timezone, timedelta
 from .database import get_db, engine
 from . import models, schemas
 
-models.Base.metadata.create_all(bind=engine)
+import os
+
+# Create tables only if not in testing mode
+if os.getenv("TESTING") != "1":
+    try:
+        models.Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"Warning: Database table creation failed (Postgres may be offline): {e}")
 
 app = FastAPI(title="GSIS Monitor API", version="1.0.0")
 
@@ -131,7 +138,7 @@ def resolve_alert(alert_id: int, db: Session = Depends(get_db)):
     return alert_dict
 
 
-# Telemetry Logs Endpoint (Chart Data)
+# Telemetry Logs Endpoint
 
 @app.get("/api/services/{service_id}/logs", response_model=List[schemas.PingLogResponse])
 def get_service_logs(

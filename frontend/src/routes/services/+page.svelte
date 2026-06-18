@@ -3,15 +3,16 @@
 
 	const API_BASE = 'http://localhost:8000';
 
-	// Services state using Svelte 5 reactive state
 	let services = $state([]);
 	let error = $state(null);
-	
-	// Form state
+	let isLoading = $state(true);
+	let saveError = $state(null);
+	let isSaving = $state(false);
+
 	let isDialogOpen = $state(false);
 	let isEditMode = $state(false);
 	let currentServiceId = $state(null);
-	
+
 	let formName = $state('');
 	let formUrl = $state('');
 	let formVerificationKeyword = $state('');
@@ -19,18 +20,20 @@
 	let formSkipTlsVerify = $state(false);
 	let formIsActive = $state(true);
 
-	// Fetch all services
 	async function loadServices() {
+		isLoading = true;
 		try {
 			const res = await fetch(`${API_BASE}/api/services`);
 			if (!res.ok) throw new Error('Failed to load services');
 			services = await res.json();
+			error = null;
 		} catch (e) {
 			error = e.message;
+		} finally {
+			isLoading = false;
 		}
 	}
 
-	// Open dialog for adding a service
 	function openAddDialog() {
 		isEditMode = false;
 		currentServiceId = null;
@@ -40,10 +43,10 @@
 		formExclusionKeyword = '';
 		formSkipTlsVerify = false;
 		formIsActive = true;
+		saveError = null;
 		isDialogOpen = true;
 	}
 
-	// Open dialog for editing a service
 	function openEditDialog(service) {
 		isEditMode = true;
 		currentServiceId = service.id;
@@ -53,12 +56,19 @@
 		formExclusionKeyword = service.exclusion_keyword || '';
 		formSkipTlsVerify = service.skip_tls_verify;
 		formIsActive = service.is_active;
+		saveError = null;
 		isDialogOpen = true;
 	}
 
-	// Submit add/edit form
+	function closeDialog() {
+		isDialogOpen = false;
+		saveError = null;
+	}
+
 	async function handleSubmit(e) {
 		e.preventDefault();
+		isSaving = true;
+		saveError = null;
 		const payload = {
 			name: formName,
 			url: formUrl,
@@ -85,25 +95,23 @@
 			}
 
 			if (!res.ok) {
-				const details = await res.json();
-				throw new Error(details.detail || 'Save failed');
+				const d = await res.json();
+				throw new Error(d.detail || 'Αποτυχία αποθήκευσης');
 			}
 
-			isDialogOpen = false;
+			closeDialog();
 			await loadServices();
 		} catch (e) {
-			alert(`Σφάλμα: ${e.message}`);
+			saveError = e.message;
+		} finally {
+			isSaving = false;
 		}
 	}
 
-	// Delete service
 	async function handleDelete(id, name) {
 		if (!confirm(`Είστε σίγουροι ότι θέλετε να διαγράψετε την υπηρεσία "${name}";`)) return;
-
 		try {
-			const res = await fetch(`${API_BASE}/api/services/${id}`, {
-				method: 'DELETE'
-			});
+			const res = await fetch(`${API_BASE}/api/services/${id}`, { method: 'DELETE' });
 			if (!res.ok) throw new Error('Delete failed');
 			await loadServices();
 		} catch (e) {
@@ -115,391 +123,218 @@
 </script>
 
 <div class="container">
-	<div class="services-header">
+	<!-- Header -->
+	<div class="page-header">
 		<div>
-			<h2>Διαχείριση Ψηφιακών Πυλών</h2>
-			<p>Προσθέστε, επεξεργαστείτε ή απενεργοποιήστε πύλες ελέγχου.</p>
+			<h2 class="page-title">Διαχείριση Ψηφιακών Πυλών</h2>
+			<p class="page-subtitle">Προσθέστε, επεξεργαστείτε ή απενεργοποιήστε πύλες ελέγχου.</p>
 		</div>
-		<button class="btn btn-primary" onclick={openAddDialog}>
+		<button class="btn btn-primary" onclick={openAddDialog} id="add-service-btn">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<line x1="12" y1="5" x2="12" y2="19"></line>
+				<line x1="5" y1="12" x2="19" y2="12"></line>
+			</svg>
 			Νέα Υπηρεσία
 		</button>
 	</div>
 
 	{#if error}
-		<div class="error-banner">
+		<div class="error-banner" role="alert">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<circle cx="12" cy="12" r="10"></circle>
+				<line x1="12" y1="8" x2="12" y2="12"></line>
+				<line x1="12" y1="16" x2="12.01" y2="16"></line>
+			</svg>
 			Σφάλμα επικοινωνίας: {error}
 		</div>
 	{/if}
 
-	<!-- Services Table -->
-	<div class="table-wrapper">
-		{#if services.length === 0}
+	<!-- Table -->
+	<div class="table-card">
+		{#if isLoading}
+			<div class="loading-rows">
+				{#each {length: 4} as _}
+					<div class="loading-row">
+						<div class="skeleton" style="height:0.875rem;width:30%"></div>
+						<div class="skeleton" style="height:0.875rem;width:45%"></div>
+						<div class="skeleton" style="height:1.375rem;width:5rem;border-radius:9999px"></div>
+					</div>
+				{/each}
+			</div>
+		{:else if services.length === 0}
 			<div class="empty-state">
-				Δεν υπάρχουν καταχωρημένες υπηρεσίες.
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<circle cx="12" cy="12" r="10"></circle>
+					<line x1="2" y1="12" x2="22" y2="12"></line>
+					<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+				</svg>
+				<p>Δεν υπάρχουν καταχωρημένες υπηρεσίες.</p>
+				<button class="btn btn-primary btn-sm" onclick={openAddDialog}>Προσθήκη πρώτης υπηρεσίας</button>
 			</div>
 		{:else}
-			<table>
-				<thead>
-					<tr>
-						<th>Όνομα</th>
-						<th>Διεύθυνση (URL)</th>
-						<th>Keyword Επαλήθευσης</th>
-						<th>Keyword Αποκλεισμού</th>
-						<th class="text-center">Παράκαμψη TLS</th>
-						<th class="text-center">Κατάσταση</th>
-						<th class="text-right">Ενέργειες</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each services as service}
+			<div class="table-overflow">
+				<table>
+					<thead>
 						<tr>
-							<td class="font-bold">{service.name}</td>
-							<td class="text-muted text-break">{service.url}</td>
-							<td>{service.verification_keyword || '-'}</td>
-							<td>{service.exclusion_keyword || '-'}</td>
-							<td class="text-center">
-								<span class="badge" class:badge-warning={service.skip_tls_verify} class:badge-secondary={!service.skip_tls_verify}>
-									{service.skip_tls_verify ? 'ΝΑΙ' : 'ΟΧΙ'}
-								</span>
-							</td>
-							<td class="text-center">
-								<span class="status-badge" class:healthy={service.is_active} class:inactive={!service.is_active}>
-									<span class="status-dot" class:healthy={service.is_active} class:inactive={!service.is_active}></span>
-									{service.is_active ? 'ΕΝΕΡΓΗ' : 'ΑΝΕΝΕΡΓΗ'}
-								</span>
-							</td>
-							<td class="text-right actions-cell">
-								<button class="btn-icon" onclick={() => openEditDialog(service)} title="Επεξεργασία">
-									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-										<path d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5"></path>
-										<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-									</svg>
-								</button>
-								<button class="btn-icon text-error-icon" onclick={() => handleDelete(service.id, service.name)} title="Διαγραφή">
-									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-										<polyline points="3 6 5 6 21 6"></polyline>
-										<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-										<line x1="10" y1="11" x2="10" y2="17"></line>
-										<line x1="14" y1="11" x2="14" y2="17"></line>
-									</svg>
-								</button>
-							</td>
+							<th>#</th>
+							<th>Όνομα</th>
+							<th>Διεύθυνση (URL)</th>
+							<th>Keyword Επαλήθευσης</th>
+							<th>Keyword Αποκλεισμού</th>
+							<th class="text-center">TLS Bypass</th>
+							<th class="text-center">Κατάσταση</th>
+							<th class="text-right">Ενέργειες</th>
 						</tr>
-					{/each}
-				</tbody>
-			</table>
+					</thead>
+					<tbody>
+						{#each services as service (service.id)}
+							<tr>
+								<td class="id-col">{service.id}</td>
+								<td class="name-col">{service.name}</td>
+								<td>
+									<a href={service.url} target="_blank" rel="noopener noreferrer" class="url-link" title={service.url}>
+										{service.url}
+									</a>
+								</td>
+								<td>
+									{#if service.verification_keyword}
+										<code class="kw-chip kw-verify">{service.verification_keyword}</code>
+									{:else}
+										<span class="none-label">—</span>
+									{/if}
+								</td>
+								<td>
+									{#if service.exclusion_keyword}
+										<code class="kw-chip kw-exclude">{service.exclusion_keyword}</code>
+									{:else}
+										<span class="none-label">—</span>
+									{/if}
+								</td>
+								<td class="text-center">
+									<span class="badge" class:badge-warning={service.skip_tls_verify} class:badge-secondary={!service.skip_tls_verify}>
+										{service.skip_tls_verify ? 'ΝΑΙ' : 'ΟΧΙ'}
+									</span>
+								</td>
+								<td class="text-center">
+									<span class="status-badge" class:healthy={service.is_active} class:inactive={!service.is_active}>
+										<span class="status-dot" class:healthy={service.is_active} class:inactive={!service.is_active}></span>
+										{service.is_active ? 'ΕΝΕΡΓΗ' : 'ΑΝΕΝΕΡΓΗ'}
+									</span>
+								</td>
+								<td class="text-right">
+									<div class="actions-wrap">
+										<button class="btn-icon" onclick={() => openEditDialog(service)} title="Επεξεργασία" id="edit-{service.id}">
+											<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+												<path d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5"></path>
+												<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+											</svg>
+											<span class="sr-only">Επεξεργασία</span>
+										</button>
+										<button class="btn-icon btn-icon--danger" onclick={() => handleDelete(service.id, service.name)} title="Διαγραφή" id="delete-{service.id}">
+											<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+												<polyline points="3 6 5 6 21 6"></polyline>
+												<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+												<line x1="10" y1="11" x2="10" y2="17"></line>
+												<line x1="14" y1="11" x2="14" y2="17"></line>
+											</svg>
+											<span class="sr-only">Διαγραφή</span>
+										</button>
+									</div>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+			<div class="table-footer">
+				<span>{services.length} υπηρεσ{services.length === 1 ? 'ία' : 'ίες'} καταχωρημέν{services.length === 1 ? 'η' : 'ες'}</span>
+			</div>
 		{/if}
 	</div>
-
-	<!-- Modal Dialog (Overlay) -->
-	{#if isDialogOpen}
-		<div class="modal-overlay">
-			<div class="modal-card">
-				<div class="modal-header">
-					<h3>{isEditMode ? 'Επεξεργασία Υπηρεσίας' : 'Προσθήκη Νέας Υπηρεσίας'}</h3>
-					<button class="btn-close" onclick={() => isDialogOpen = false}>&times;</button>
-				</div>
-				<form onsubmit={handleSubmit}>
-					<div class="form-group">
-						<label for="name">Όνομα Υπηρεσίας</label>
-						<input type="text" id="name" bind:value={formName} required placeholder="π.χ. e-Paravolo" />
-					</div>
-					<div class="form-group">
-						<label for="url">Διεύθυνση (URL)</label>
-						<input type="url" id="url" bind:value={formUrl} required placeholder="https://example.gov.gr" />
-					</div>
-					<div class="form-row">
-						<div class="form-group">
-							<label for="verification_keyword">Keyword Επαλήθευσης (Προαιρετικό)</label>
-							<input type="text" id="verification_keyword" bind:value={formVerificationKeyword} placeholder="Έλεγχος ύπαρξης στο HTML" />
-						</div>
-						<div class="form-group">
-							<label for="exclusion_keyword">Keyword Αποκλεισμού (Προαιρετικό)</label>
-							<input type="text" id="exclusion_keyword" bind:value={formExclusionKeyword} placeholder="Σφάλμα αν βρεθεί (π.χ. maintenance)" />
-						</div>
-					</div>
-
-					<div class="form-checkboxes">
-						<label class="checkbox-label">
-							<input type="checkbox" bind:checked={formSkipTlsVerify} />
-							<span>Παράκαμψη ελέγχου TLS/SSL (InsecureSkipVerify)</span>
-						</label>
-						<label class="checkbox-label">
-							<input type="checkbox" bind:checked={formIsActive} />
-							<span>Ενεργή παρακολούθηση (Active)</span>
-						</label>
-					</div>
-
-					<div class="modal-actions">
-						<button type="button" class="btn btn-secondary" onclick={() => isDialogOpen = false}>Ακύρωση</button>
-						<button type="submit" class="btn btn-primary">Αποθήκευση</button>
-					</div>
-				</form>
-			</div>
-		</div>
-	{/if}
 </div>
 
-<style>
-	.services-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 2rem;
-	}
+<!-- Modal -->
+{#if isDialogOpen}
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Φόρμα Υπηρεσίας" onclick={(e) => e.target === e.currentTarget && closeDialog()}>
+		<div class="modal-card">
+			<div class="modal-header">
+				<h3>{isEditMode ? 'Επεξεργασία Υπηρεσίας' : 'Προσθήκη Νέας Υπηρεσίας'}</h3>
+				<button class="btn-close" onclick={closeDialog} aria-label="Κλείσιμο">&times;</button>
+			</div>
 
-	.services-header h2 {
-		font-size: 1.75rem;
-		color: var(--primary-color);
-	}
+			<form onsubmit={handleSubmit} id="service-form">
+				<div class="form-section">
+					<div class="form-group">
+						<label for="svc-name">Όνομα Υπηρεσίας <span class="required">*</span></label>
+						<input type="text" id="svc-name" bind:value={formName} required placeholder="π.χ. e-Paravolo" autocomplete="off" />
+					</div>
+					<div class="form-group">
+						<label for="svc-url">Διεύθυνση (URL) <span class="required">*</span></label>
+						<input type="url" id="svc-url" bind:value={formUrl} required placeholder="https://example.gov.gr" autocomplete="off" />
+					</div>
+				</div>
 
-	.services-header p {
-		color: var(--text-secondary);
-		font-size: 0.9375rem;
-		margin-top: 0.25rem;
-	}
+				<div class="form-divider">
+					<span>Επαλήθευση Περιεχομένου</span>
+				</div>
 
-	.btn {
-		padding: 0.625rem 1.25rem;
-		font-size: 0.875rem;
-		font-weight: 600;
-		border-radius: var(--radius-md);
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-	}
+				<div class="form-section">
+					<div class="form-row">
+						<div class="form-group">
+							<label for="svc-verify">Keyword Επαλήθευσης</label>
+							<input type="text" id="svc-verify" bind:value={formVerificationKeyword} placeholder="Πρέπει να υπάρχει στο HTML" autocomplete="off" />
+							<span class="field-hint">Εάν οριστεί, το keyword πρέπει να βρεθεί στο σώμα της απόκρισης.</span>
+						</div>
+						<div class="form-group">
+							<label for="svc-exclude">Keyword Αποκλεισμού</label>
+							<input type="text" id="svc-exclude" bind:value={formExclusionKeyword} placeholder="π.χ. maintenance" autocomplete="off" />
+							<span class="field-hint">Εάν το keyword βρεθεί, η υπηρεσία θεωρείται OFFLINE.</span>
+						</div>
+					</div>
+				</div>
 
-	.btn-primary {
-		background-color: var(--primary-color);
-		color: var(--bg-color);
-	}
+				<div class="form-divider">
+					<span>Ρυθμίσεις</span>
+				</div>
 
-	.btn-primary:hover {
-		background-color: var(--primary-hover);
-	}
+				<div class="form-section">
+					<div class="checkbox-group">
+						<label class="checkbox-label" for="svc-tls">
+							<input type="checkbox" id="svc-tls" bind:checked={formSkipTlsVerify} />
+							<span class="checkbox-custom"></span>
+							<span>
+								<strong>Παράκαμψη ελέγχου TLS/SSL</strong>
+								<small>InsecureSkipVerify — χρήση μόνο για εσωτερικά endpoints</small>
+							</span>
+						</label>
+						<label class="checkbox-label" for="svc-active">
+							<input type="checkbox" id="svc-active" bind:checked={formIsActive} />
+							<span class="checkbox-custom"></span>
+							<span>
+								<strong>Ενεργή παρακολούθηση</strong>
+								<small>Ο pinger θα ελέγχει αυτή την υπηρεσία</small>
+							</span>
+						</label>
+					</div>
+				</div>
 
-	.btn-secondary {
-		background-color: var(--bg-darker);
-		color: var(--text-secondary);
-		border: 1px solid var(--border-color);
-	}
+				{#if saveError}
+					<div class="form-error" role="alert">{saveError}</div>
+				{/if}
 
-	.btn-secondary:hover {
-		background-color: var(--border-color);
-	}
-
-	.error-banner {
-		background-color: var(--error-light);
-		color: var(--error-color);
-		border: 1px solid var(--error-color);
-		padding: 1rem;
-		border-radius: var(--radius-md);
-		margin-bottom: 1.5rem;
-		font-weight: 500;
-	}
-
-	.table-wrapper {
-		background-color: var(--bg-card);
-		border: 1px solid var(--border-color);
-		border-radius: var(--radius-lg);
-		box-shadow: var(--shadow-sm);
-		overflow: hidden;
-	}
-
-	.empty-state {
-		padding: 3rem;
-		text-align: center;
-		color: var(--text-muted);
-	}
-
-	.font-bold {
-		font-weight: 600;
-		font-family: 'Outfit', sans-serif;
-		color: var(--text-primary);
-	}
-
-	.text-center {
-		text-align: center;
-	}
-
-	.text-right {
-		text-align: right;
-	}
-
-	.text-break {
-		word-break: break-all;
-	}
-
-	.badge {
-		display: inline-block;
-		padding: 0.125rem 0.5rem;
-		font-size: 0.6875rem;
-		font-weight: 700;
-		border-radius: var(--radius-sm);
-	}
-
-	.badge-warning {
-		background-color: var(--warning-light);
-		color: var(--warning-color);
-	}
-
-	.badge-secondary {
-		background-color: var(--bg-darker);
-		color: var(--text-secondary);
-		border: 1px solid var(--border-color);
-	}
-
-	/* Icon buttons */
-	.actions-cell {
-		display: flex;
-		justify-content: flex-end;
-		gap: 0.5rem;
-	}
-
-	.btn-icon {
-		background: none;
-		border: none;
-		padding: 0.375rem;
-		border-radius: var(--radius-sm);
-		color: var(--text-secondary);
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 2rem;
-		height: 2rem;
-		transition: var(--transition-all);
-	}
-
-	.btn-icon svg {
-		width: 1.125rem;
-		height: 1.125rem;
-	}
-
-	.btn-icon:hover {
-		background-color: var(--bg-darker);
-		color: var(--primary-color);
-	}
-
-	.btn-icon.text-error-icon:hover {
-		background-color: var(--error-light);
-		color: var(--error-color);
-	}
-
-	/* Modal overlay & card */
-	.modal-overlay {
-		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		background-color: rgba(15, 23, 42, 0.4);
-		backdrop-filter: blur(4px);
-		display: flex;
-		justify-content: center;
-		align-items: center;
-		z-index: 50;
-	}
-
-	.modal-card {
-		background-color: var(--bg-card);
-		border-radius: var(--radius-lg);
-		box-shadow: var(--shadow-lg);
-		width: 100%;
-		max-width: 580px;
-		overflow: hidden;
-		display: flex;
-		flex-direction: column;
-		border: 1px solid var(--border-color);
-		animation: modalFadeIn 0.2s ease-out;
-	}
-
-	.modal-header {
-		padding: 1.25rem 1.5rem;
-		border-bottom: 1px solid var(--border-color);
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.modal-header h3 {
-		font-size: 1.125rem;
-		color: var(--text-primary);
-	}
-
-	.btn-close {
-		background: none;
-		font-size: 1.5rem;
-		color: var(--text-muted);
-		line-height: 1;
-		padding: 0.25rem;
-		transition: var(--transition-all);
-	}
-
-	.btn-close:hover {
-		color: var(--error-color);
-	}
-
-	form {
-		padding: 1.5rem;
-	}
-
-	.form-group {
-		margin-bottom: 1.25rem;
-	}
-
-	.form-row {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 1rem;
-	}
-
-	.form-checkboxes {
-		margin: 1.5rem 0;
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-	}
-
-	.checkbox-label {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		cursor: pointer;
-		font-size: 0.875rem;
-		font-weight: 500;
-		color: var(--text-secondary);
-		margin-bottom: 0;
-	}
-
-	.checkbox-label input {
-		width: auto;
-		cursor: pointer;
-	}
-
-	.modal-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 0.75rem;
-		border-top: 1px solid var(--border-color);
-		padding-top: 1.25rem;
-		margin-top: 1.5rem;
-	}
-
-	@keyframes modalFadeIn {
-		from {
-			opacity: 0;
-			transform: scale(0.95);
-		}
-		to {
-			opacity: 1;
-			transform: scale(1);
-		}
-	}
-
-	@media (max-width: 640px) {
-		.form-row {
-			grid-template-columns: 1fr;
-			gap: 0;
-		}
-	}
-</style>
+				<div class="modal-actions">
+					<button type="button" class="btn btn-secondary" onclick={closeDialog} disabled={isSaving}>Ακύρωση</button>
+					<button type="submit" class="btn btn-primary" disabled={isSaving} id="save-service-btn">
+						{#if isSaving}
+							<span class="btn-spinner"></span> Αποθήκευση...
+						{:else}
+							{isEditMode ? 'Αποθήκευση Αλλαγών' : 'Προσθήκη Υπηρεσίας'}
+						{/if}
+					</button>
+				</div>
+			</form>
+		</div>
+	</div>
+{/if}

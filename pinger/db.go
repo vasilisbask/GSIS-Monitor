@@ -174,13 +174,18 @@ func ProcessAlerts(db *sql.DB, serviceID int, pingLog *PingLog, rules []AlertRul
 			} else {
 				violated = EvaluateOperator(float64(*pingLog.SSLExpiryDays), rule.Operator, rule.Value)
 				if violated {
-					reason = fmt.Sprintf("SSL certificate expires in %d days, violating threshold %s %.0f days", *pingLog.SSLExpiryDays, rule.Operator, rule.Value)
+					if *pingLog.SSLExpiryDays < 0 {
+						absDays := -(*pingLog.SSLExpiryDays)
+						reason = fmt.Sprintf("SSL certificate expired %d days ago, violating threshold %s %.0f days", absDays, rule.Operator, rule.Value)
+					} else {
+						reason = fmt.Sprintf("SSL certificate expires in %d days, violating threshold %s %.0f days", *pingLog.SSLExpiryDays, rule.Operator, rule.Value)
+					}
 				}
 			}
 
 		case "content_verified":
 			// rule.Value = 1 means content must be verified (ContentVerified must be true). If false, it's violated.
-			// rule.Value = 0 means content must NOT be verified (rare, but let's handle).
+			// rule.Value = 0 means content must NOT be verified.
 			val := 0.0
 			if pingLog.ContentVerified {
 				val = 1.0

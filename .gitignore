@@ -5,6 +5,7 @@ backend/.venv/
 
 # Go build artifacts
 pinger/pinger
+pinger/pinger-linux
 pinger/pinger.exe
 pinger/*.exe
 pinger/*.out

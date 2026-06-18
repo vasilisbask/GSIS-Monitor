@@ -1,6 +1,3 @@
--- Enable TimescaleDB extension if not already enabled
-CREATE EXTENSION IF NOT EXISTS timescaledb;
-
 -- Create function to update timestamp
 CREATE OR REPLACE FUNCTION update_modified_column()
 RETURNS TRIGGER AS $$
@@ -45,9 +42,6 @@ CREATE TABLE IF NOT EXISTS ping_log (
     content_verified BOOLEAN DEFAULT FALSE
 );
 
--- Convert to hypertable partitioned by 'time'
-SELECT create_hypertable('ping_log', 'time', if_not_exists => TRUE);
-
 -- Create index for faster dashboard reads
 CREATE INDEX IF NOT EXISTS idx_ping_log_service_time ON ping_log (service_id, time DESC);
 
@@ -76,10 +70,11 @@ CREATE TABLE IF NOT EXISTS alert_log (
 -- Seed initial GSIS public services
 INSERT INTO service (name, url, verification_keyword, exclusion_keyword, skip_tls_verify)
 VALUES 
-('e-Paravolo', 'https://www1.gsis.gr/sgsisportal/eparavolo.html', 'e-Παράβολο', 'maintenance', FALSE),
-('Taxisnet SSO Login', 'https://sso.gsis.gr/login', 'Taxisnet', 'error', FALSE),
-('Διαύγεια', 'https://diavgeia.gov.gr', 'Διαύγεια', 'error', FALSE),
-('Απογραφή', 'https://apografi.gov.gr', 'Απογραφή', 'maintenance', TRUE)
+('e-Paravolo', 'https://www.gsis.gr/polites-epiheiriseis/pliromes-kai-eispraxeis/e-paravolo', 'e-Παράβολο', NULL, FALSE),
+('Taxisnet SSO Login', 'https://login.gsis.gr/sso', 'gsis_logo.png', NULL, FALSE),
+('Διαύγεια', 'https://diavgeia.gov.gr', NULL, NULL, FALSE),
+('Απογραφή', 'https://apografi.gov.gr', NULL, NULL, TRUE),
+('ΓΓΠΣΨΔ Portal', 'https://www.gsis.gr', 'Γενική Γραμματεία', NULL, FALSE)
 ON CONFLICT (name) DO NOTHING;
 
 -- Seed default alert rules for these services
