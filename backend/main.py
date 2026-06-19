@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, status
+from fastapi import FastAPI, Depends, HTTPException, Query, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -32,7 +32,7 @@ app.add_middleware(
 
 @app.get("/api/services", response_model=List[schemas.ServiceResponse])
 def get_services(db: Session = Depends(get_db)):
-    return db.query(models.Service).order_by(models.Service.id).all()
+    return db.query(models.Service).order_by(models.Service.order_index.asc(), models.Service.id.asc()).all()
 
 @app.post("/api/services", response_model=schemas.ServiceResponse, status_code=status.HTTP_201_CREATED)
 def create_service(service: schemas.ServiceCreate, db: Session = Depends(get_db)):
@@ -45,6 +45,15 @@ def create_service(service: schemas.ServiceCreate, db: Session = Depends(get_db)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Service creation failed: {str(e)}")
+
+@app.put("/api/services/reorder", status_code=status.HTTP_200_OK)
+def reorder_services(service_ids: List[int] = Body(...), db: Session = Depends(get_db)):
+    for index, s_id in enumerate(service_ids):
+        db_service = db.query(models.Service).filter(models.Service.id == s_id).first()
+        if db_service:
+            db_service.order_index = index
+    db.commit()
+    return {"status": "success"}
 
 @app.put("/api/services/{service_id}", response_model=schemas.ServiceResponse)
 def update_service(service_id: int, service_update: schemas.ServiceUpdate, db: Session = Depends(get_db)):
@@ -174,7 +183,7 @@ def get_service_logs(
 
 @app.get("/api/dashboard/summary", response_model=schemas.DashboardSummary)
 def get_dashboard_summary(db: Session = Depends(get_db)):
-    services = db.query(models.Service).all()
+    services = db.query(models.Service).order_by(models.Service.order_index.asc(), models.Service.id.asc()).all()
     
     total_services = len(services)
     active_services = 0

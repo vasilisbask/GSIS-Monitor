@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -10,6 +10,7 @@ class ServiceBase(BaseModel):
     exclusion_keyword: Optional[str] = Field(None, max_length=100)
     skip_tls_verify: Optional[bool] = False
     is_active: Optional[bool] = True
+    order_index: Optional[int] = 0
 
 class ServiceCreate(ServiceBase):
     pass
@@ -21,14 +22,14 @@ class ServiceUpdate(BaseModel):
     exclusion_keyword: Optional[str] = None
     skip_tls_verify: Optional[bool] = None
     is_active: Optional[bool] = None
+    order_index: Optional[int] = None
 
 class ServiceResponse(ServiceBase):
     id: int
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # PingLog Schemas
 class PingLogBase(BaseModel):
@@ -46,8 +47,7 @@ class PingLogBase(BaseModel):
     content_verified: bool = False
 
 class PingLogResponse(PingLogBase):
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # AlertRule Schemas
 class AlertRuleBase(BaseModel):
@@ -64,8 +64,7 @@ class AlertRuleResponse(AlertRuleBase):
     id: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # AlertLog Schemas
 class AlertLogBase(BaseModel):
@@ -80,8 +79,7 @@ class AlertLogResponse(AlertLogBase):
     id: int
     service_name: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Dashboard Summary Schemas
 class ServiceSummary(BaseModel):

@@ -119,6 +119,51 @@
 		}
 	}
 
+	let draggedIndex = $state(null);
+	let dragOverIndex = $state(null);
+
+	function dragStart(e, index) {
+		draggedIndex = index;
+		e.dataTransfer.effectAllowed = 'move';
+		e.dataTransfer.setData('text/plain', index);
+		e.currentTarget.classList.add('dragging');
+	}
+
+	function dragOver(e, index) {
+		e.preventDefault();
+		dragOverIndex = index;
+	}
+
+	function dragEnd(e) {
+		e.currentTarget.classList.remove('dragging');
+		draggedIndex = null;
+		dragOverIndex = null;
+	}
+
+	async function drop(e, index) {
+		e.preventDefault();
+		const fromIndex = draggedIndex;
+		const toIndex = index;
+		if (fromIndex === null || fromIndex === toIndex) return;
+
+		const newServices = [...services];
+		const [movedItem] = newServices.splice(fromIndex, 1);
+		newServices.splice(toIndex, 0, movedItem);
+		services = newServices;
+
+		try {
+			const res = await fetch(`${API_BASE}/api/services/reorder`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(services.map(s => s.id))
+			});
+			if (!res.ok) throw new Error('Reordering failed');
+		} catch (e) {
+			alert(`Σφάλμα επαναδιάταξης: ${e.message}`);
+			await loadServices();
+		}
+	}
+
 	onMount(loadServices);
 </script>
 
@@ -176,7 +221,7 @@
 				<table>
 					<thead>
 						<tr>
-							<th>#</th>
+							<th></th>
 							<th>Όνομα</th>
 							<th>Διεύθυνση (URL)</th>
 							<th>Keyword Επαλήθευσης</th>
@@ -187,9 +232,20 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each services as service (service.id)}
-							<tr>
-								<td class="id-col">{service.id}</td>
+						{#each services as service, index (service.id)}
+							<tr draggable="true" ondragstart={(e) => dragStart(e, index)} ondragover={(e) => dragOver(e, index)} ondragend={dragEnd} ondrop={(e) => drop(e, index)} class:drag-over={dragOverIndex === index}>
+								<td class="order-col">
+									<div class="drag-handle" title="Σύρετε για αλλαγή σειράς">
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="icon-drag">
+											<circle cx="9" cy="5" r="1.5"></circle>
+											<circle cx="9" cy="12" r="1.5"></circle>
+											<circle cx="9" cy="19" r="1.5"></circle>
+											<circle cx="15" cy="5" r="1.5"></circle>
+											<circle cx="15" cy="12" r="1.5"></circle>
+											<circle cx="15" cy="19" r="1.5"></circle>
+										</svg>
+									</div>
+								</td>
 								<td class="name-col">{service.name}</td>
 								<td>
 									<a href={service.url} target="_blank" rel="noopener noreferrer" class="url-link" title={service.url}>
@@ -257,7 +313,7 @@
 {#if isDialogOpen}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Φόρμα Υπηρεσίας" onclick={(e) => e.target === e.currentTarget && closeDialog()}>
+	<div class="modal-backdrop" role="dialog" aria-modal="true" tabindex="-1" aria-label="Φόρμα Υπηρεσίας" onclick={(e) => e.target === e.currentTarget && closeDialog()}>
 		<div class="modal-card">
 			<div class="modal-header">
 				<h3>{isEditMode ? 'Επεξεργασία Υπηρεσίας' : 'Προσθήκη Νέας Υπηρεσίας'}</h3>

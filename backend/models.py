@@ -13,6 +13,7 @@ class Service(Base):
     exclusion_keyword = Column(String(100), nullable=True)
     skip_tls_verify = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
+    order_index = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 

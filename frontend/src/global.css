@@ -419,6 +419,15 @@ tbody tr:last-child td { border-bottom: none; }
 .btn-icon:hover { background: var(--primary-light); color: var(--primary-color); border-color: var(--primary-color); }
 .btn-icon--danger:hover { background: var(--error-light); color: var(--error-color); border-color: var(--error-color); }
 
+/* Drag and drop */
+.order-col { width: 40px; text-align: center; }
+tr[draggable="true"] { cursor: grab; }
+tr.dragging { opacity: 0.4; background: var(--bg-hover); }
+tr.drag-over { border-top: 2px solid var(--primary-color); }
+.drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: var(--text-secondary); opacity: 0.6; transition: opacity 0.15s; }
+.drag-handle:hover { opacity: 1; color: var(--primary-color); }
+.icon-drag { width: 16px; height: 16px; }
+
 /* Loading + empty */
 
 .loading-rows { padding: 0.5rem 0; }

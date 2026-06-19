@@ -200,3 +200,37 @@ def test_get_service_logs_and_dashboard_summary():
     assert summary["total_services"] == 1
     assert summary["healthy_services"] == 1
     assert summary["average_response_time_ms"] == 0.0
+
+def test_reorder_services():
+    # 1. Create two services
+    response = client.post("/api/services", json={"name": "Service A", "url": "https://a.gov.gr"})
+    id_a = response.json()["id"]
+    response = client.post("/api/services", json={"name": "Service B", "url": "https://b.gov.gr"})
+    id_b = response.json()["id"]
+
+    # 2. Check default order (by order_index=0, fallback to id: A then B)
+    response = client.get("/api/services")
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["id"] == id_a
+    assert data[1]["id"] == id_b
+
+    # 3. Perform reorder: B should come first, then A
+    response = client.put("/api/services/reorder", json=[id_b, id_a])
+    if response.status_code != 200:
+        print("ERROR DETAILS:", response.json())
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+    # 4. Verify ordered response in /api/services
+    response = client.get("/api/services")
+    data = response.json()
+    assert data[0]["id"] == id_b
+    assert data[1]["id"] == id_a
+
+    # 5. Verify ordered response in /api/dashboard/summary
+    response = client.get("/api/dashboard/summary")
+    data = response.json()
+    assert data["services"][0]["id"] == id_b
+    assert data["services"][1]["id"] == id_a
+
